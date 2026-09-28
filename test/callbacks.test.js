@@ -617,4 +617,153 @@ for (const [key, factory] of FACTORIES) {
       expect(commitHookInvocationsCount).toEqual(1);
     });
   });
+
+  describe(`${key} trace_v2`, function() {
+    let db;
+    beforeEach(async function() {
+      db = await sqlite3.open_v2(':memory:');
+    });
+
+    afterEach(async function() {
+      await sqlite3.close(db);
+    });
+
+    it('should report statements', async function() {
+      let rc;
+
+      const context = {};
+      const calls = [];
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT, (...args) => {
+        calls.push(args);
+      }, context);
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(calls.length).toEqual(1);
+
+      const [event, userData, stmt, sql] = calls[0];
+      expect(event).toEqual(SQLite.SQLITE_TRACE_STMT);
+      expect(userData).toBe(context);
+      expect(stmt).toBeGreaterThan(0);
+      expect(sql).toEqual('SELECT 1');
+    });
+
+    it('should report statement run times', async function() {
+      let rc;
+
+      const calls = [];
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_PROFILE, (...args) => {
+        calls.push(args);
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(calls.length).toEqual(1);
+
+      const [event, , stmt, nanoseconds] = calls[0];
+      expect(event).toEqual(SQLite.SQLITE_TRACE_PROFILE);
+      expect(stmt).toBeGreaterThan(0);
+      expect(typeof nanoseconds).toEqual('bigint');
+      expect(nanoseconds).toBeGreaterThanOrEqual(0n);
+    });
+
+    it('should report rows', async function() {
+      let rc;
+
+      const calls = [];
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_ROW, (...args) => {
+        calls.push(args);
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT * FROM (VALUES (1), (2), (3))');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(calls.length).toEqual(3);
+      for (const [event, , stmt, x] of calls) {
+        expect(event).toEqual(SQLite.SQLITE_TRACE_ROW);
+        expect(stmt).toBeGreaterThan(0);
+        expect(x).toBeUndefined();
+      }
+    });
+
+    it('should report connection close', async function() {
+      const db2 = await sqlite3.open_v2(':memory:');
+
+      const calls = [];
+      sqlite3.trace_v2(db2, SQLite.SQLITE_TRACE_CLOSE, (...args) => {
+        calls.push(args);
+      });
+
+      await sqlite3.close(db2);
+      expect(calls).toEqual([[SQLite.SQLITE_TRACE_CLOSE, undefined, db2, undefined]]);
+    });
+
+    it('should report only the events in the mask', async function() {
+      let rc;
+
+      const events = new Set();
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT | SQLite.SQLITE_TRACE_ROW, event => {
+        events.add(event);
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect([...events].sort()).toEqual([SQLite.SQLITE_TRACE_STMT, SQLite.SQLITE_TRACE_ROW]);
+    });
+
+    it('should stop tracing when disabled', async function() {
+      let rc;
+
+      let count = 0;
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT, () => {
+        count++;
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(count).toEqual(1);
+
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT, null);
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(count).toEqual(1);
+    });
+
+    it('should call asynchronous trace callback', async function() {
+      let rc;
+
+      const sqls = [];
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT, async (event, userData, stmt, sql) => {
+        await new Promise(resolve => setTimeout(resolve));
+        sqls.push(sql);
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      expect(sqls).toEqual(['SELECT 1']);
+    });
+
+    it('should trace each connection with its own callback', async function() {
+      let rc;
+      const db2 = await sqlite3.open_v2(':memory:');
+
+      const sqls = [];
+      const sqls2 = [];
+      sqlite3.trace_v2(db, SQLite.SQLITE_TRACE_STMT, (event, userData, stmt, sql) => {
+        sqls.push(sql);
+      });
+      sqlite3.trace_v2(db2, SQLite.SQLITE_TRACE_STMT, (event, userData, stmt, sql) => {
+        sqls2.push(sql);
+      });
+
+      rc = await sqlite3.exec(db, 'SELECT 1');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      rc = await sqlite3.exec(db2, 'SELECT 2');
+      expect(rc).toEqual(SQLite.SQLITE_OK);
+      await sqlite3.close(db2);
+
+      expect(sqls).toEqual(['SELECT 1']);
+      expect(sqls2).toEqual(['SELECT 2']);
+    });
+  });
 }

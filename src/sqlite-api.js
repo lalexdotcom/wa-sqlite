@@ -6,7 +6,7 @@ export * from './sqlite-constants.js';
 const MAX_INT64 = 0x7fffffffffffffffn;
 const MIN_INT64 = -0x8000000000000000n;
 
-const AsyncFunction = Object.getPrototypeOf(async function() { }).constructor;
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 
 export class SQLiteError extends Error {
   constructor(message, code) {
@@ -268,7 +268,7 @@ export function Factory(Module) {
       return check(fname, result, mapStmtToDB.get(stmt));
     };
   })();
-
+  
   sqlite3.close = (function() {
     const fname = 'sqlite3_close';
     const f = Module.cwrap(fname, ...decl('n:n'), { async });
@@ -411,7 +411,7 @@ export function Factory(Module) {
 
   sqlite3.create_function = function(db, zFunctionName, nArg, eTextRep, pApp, xFunc, xStep, xFinal) {
     verifyDatabase(db);
-
+    
     // Convert SQLite callback arguments to JavaScript-friendly arguments.
     function adapt(f) {
       return f instanceof AsyncFunction ?
@@ -682,7 +682,7 @@ export function Factory(Module) {
     const result = Module.set_authorizer(db, adapt(xAuth), pApp);
     return check('sqlite3_set_authorizer', result, db);
   };;
-
+  
   sqlite3.sql = (function() {
     const fname = 'sqlite3_sql';
     const f = Module.cwrap(fname, ...decl('n:s'));
@@ -715,7 +715,7 @@ export function Factory(Module) {
         onFinally.push(() => Module._sqlite3_free(pzHead));
         Module.HEAPU8.set(utf8, pzHead);
         Module.HEAPU8[pzEnd - 1] = 0;
-
+  
         // Use extra space for the statement handle and SQL tail pointer.
         const pStmt = pzHead + allocSize - 8;
         const pzTail = pzHead + allocSize - 4;
@@ -729,7 +729,7 @@ export function Factory(Module) {
           stmt = 0;
         }
         onFinally.push(maybeFinalize);
-
+        
         // Loop over statements.
         Module.setValue(pzTail, pzHead, '*');
         do {
@@ -752,7 +752,7 @@ export function Factory(Module) {
           if (rc !== SQLite.SQLITE_OK) {
             check('sqlite3_prepare_v3', rc, db);
           }
-
+          
           stmt = Module.getValue(pStmt, '*');
           if (stmt) {
             mapStmtToDB.set(stmt, db);
@@ -794,7 +794,7 @@ export function Factory(Module) {
         iUpdateType,
         Module.UTF8ToString(dbName),
         Module.UTF8ToString(tblName),
-        cvt32x2ToBigInt(lo32, hi32)
+		cvt32x2ToBigInt(lo32, hi32)
       ];
     };
     function adapt(f) {
@@ -804,39 +804,30 @@ export function Factory(Module) {
     }
 
     Module.update_hook(db, adapt(xUpdateHook));
-  };
+  };;
 
-  sqlite3.trace = function(db, mTrace, xTrace) {
-    verifyDatabase(db)
+  sqlite3.trace_v2 = function(db, uMask, xCallback, pCtx) {
+    verifyDatabase(db);
 
-    function cvtArgs(opCode, _pP, pX) {
-      // NOTE: only SQLITE_TRACE_STMT is currently implemented
-      switch (opCode) {
+    // Convert SQLite callback arguments to JavaScript-friendly arguments.
+    function cvtArgs(uEvent, pP, pX) {
+      switch (uEvent) {
         case SQLite.SQLITE_TRACE_STMT:
-          return [
-            opCode,
-            "SQLITE_TRACE_STMT",
-            Module.UTF8ToString(pX)
-          ]
+          return [uEvent, pCtx, pP, Module.UTF8ToString(pX)];
+        case SQLite.SQLITE_TRACE_PROFILE:
+          return [uEvent, pCtx, pP, cvt32x2ToBigInt(Module.getValue(pX, 'i32'), Module.getValue(pX + 4, 'i32'))];
         default:
-          // TODO: implement other variants
-          return [
-            opCode,
-            "UNSUPPORTED_OP",
-            null
-          ]
+          return [uEvent, pCtx, pP, undefined];
       }
     }
-
     function adapt(f) {
       return f instanceof AsyncFunction ?
-        (async (opCode, pP, pX) => f(...cvtArgs(opCode, pP, pX))) :
-        ((opCode, pP, pX) => f(...cvtArgs(opCode, pP, pX)))
+        (async (uEvent, pP, pX) => f(...cvtArgs(uEvent, pP, pX))) :
+        ((uEvent, pP, pX) => f(...cvtArgs(uEvent, pP, pX)));
     }
 
-    Module.trace(db, mTrace, adapt(xTrace))
-  }
-
+    Module.trace_v2(db, uMask, xCallback && adapt(xCallback));
+  };
 
   sqlite3.value = function(pValue) {
     const type = sqlite3.value_type(pValue);
@@ -954,7 +945,7 @@ export function Factory(Module) {
           Module.retryOps = [];
         }
       }
-
+      
       rc = await f();
       if (rc === SQLite.SQLITE_OK || Module.retryOps.length === 0) {
         if (Module.pendingOps.length) {

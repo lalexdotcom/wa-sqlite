@@ -7,7 +7,6 @@ EXTENSION_FUNCTIONS_URL = https://www.sqlite.org/contrib/download/extension-func
 EXTENSION_FUNCTIONS_SHA3 = ee39ddf5eaa21e1d0ebcbceeab42822dd0c4f82d8039ce173fd4814807faabfa
 
 # source files
-# TODO: maybe use libtrace only in debug mode
 CFILES = \
 	sqlite3.c \
 	extension-functions.c \

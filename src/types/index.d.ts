@@ -764,6 +764,34 @@ declare interface SQLiteAPI {
    */
   step(stmt: number): Promise<number>;
 
+  /**
+   * Register a trace callback
+   *
+   * The callback is invoked for each event in `mask`, with the arguments of
+   * the C callback and `x` dereferenced:
+   * - SQLITE_TRACE_STMT: 1, `p` is the prepared statement and `x` its SQL
+   *   text, or an SQL comment for a trigger
+   * - SQLITE_TRACE_PROFILE: 2, `p` is the prepared statement and `x` its
+   *   run time in nanoseconds
+   * - SQLITE_TRACE_ROW: 4, `p` is the prepared statement and `x` is undefined
+   * - SQLITE_TRACE_CLOSE: 8, `p` is the database and `x` is undefined
+   *
+   * Tracing is disabled when `callback` is null or `mask` is zero.
+   *
+   * If the callback returns a Promise, it must be declared `async`, i.e.
+   * it must allow use of `await`.
+   * @see https://www.sqlite.org/c3ref/trace_v2.html
+   * @param db database pointer
+   * @param mask bitwise OR of `SQLITE_TRACE_*` events
+   * @param callback
+   * @param userData passed to the callback as its second argument
+   */
+  trace_v2<T = any>(
+    db: number,
+    mask: number,
+    callback: ((event: number, userData: T, p: number, x: string|bigint|undefined) => void|Promise<void>) | null,
+    userData?: T): void;
+
    /**
    * Register an update hook
    *
@@ -867,11 +895,6 @@ declare interface SQLiteAPI {
    * @returns `SQLITE_OK` (throws exception on error)
    */
   vfs_register(vfs: SQLiteVFS, makeDefault?: boolean): number;
-
-  trace(
-    db: number, mTrace: 1 | 2 | 3 | 4,
-    xTrace: (opCode: 1 | 2 | 3 | 4, opStr: string, sql?: string) => number
-  ): void
 }
 
 /** @ignore */
@@ -1108,6 +1131,10 @@ declare module 'wa-sqlite/src/sqlite-constants.js' {
   export const SQLITE_PREPARE_PERSISTENT: 0x01;
   export const SQLITE_PREPARE_NORMALIZED: 0x02;
   export const SQLITE_PREPARE_NO_VTAB: 0x04;
+  export const SQLITE_TRACE_STMT: 0x01;
+  export const SQLITE_TRACE_PROFILE: 0x02;
+  export const SQLITE_TRACE_ROW: 0x04;
+  export const SQLITE_TRACE_CLOSE: 0x08;
 }
 
 declare module 'wa-sqlite' {
