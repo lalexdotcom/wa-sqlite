@@ -31,6 +31,7 @@ class File {
 
   /** @type {BroadcastChannel} */ broadcastChannel;
   /** @type {Transaction[]} */ broadcastReceived;
+  /** @type {Set<Promise<void>>} */ commitsInFlight;
 
   /** @type {number} */ lockState;
   /** @type {{write?: function, reserved?: function, hint?: function}} */ locks;
@@ -55,6 +56,7 @@ class File {
       this.viewReleaser = null;
       this.broadcastChannel = new BroadcastChannel('mirror:' + pathname);
       this.broadcastReceived = [];
+      this.commitsInFlight = new Set();
       this.lockState = VFS.SQLITE_LOCK_NONE;
       this.locks = {};
       this.abortController = new AbortController();
@@ -234,6 +236,8 @@ export class IDBMirrorVFS extends FacadeVFS {
       this.#mapIdToFile.delete(fileId);
 
       if (file?.flags & VFS.SQLITE_OPEN_MAIN_DB) {
+        // Commits still in flight broadcast on this channel when they complete.
+        await Promise.allSettled(file.commitsInFlight);
         if (file.abortController.signal.aborted) {
           // The journal belongs to a view that was never stored.
           this.#mapPathToFile.delete(file.path + '-journal');
@@ -733,6 +737,8 @@ export class IDBMirrorVFS extends FacadeVFS {
       }
     });
 
+    file.commitsInFlight.add(complete);
+    complete.finally(() => file.commitsInFlight.delete(complete)).catch(() => {});
     if (file.synchronous === 'full') {
       try {
         await complete;
