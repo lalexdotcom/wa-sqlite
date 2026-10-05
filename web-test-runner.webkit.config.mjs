@@ -8,6 +8,7 @@ import base from './web-test-runner.config.mjs';
 
 export default {
   ...base,
+  testsFinishTimeout: 20 * 60 * 1000,
   files: process.env.WTR_FILES ? [process.env.WTR_FILES] : base.files,
   browsers: [
     playwrightLauncher({

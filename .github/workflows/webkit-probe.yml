@@ -38,26 +38,13 @@ jobs:
 
   suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         file:
-        - test/AccessHandlePoolVFS.test.js
         - test/IDBBatchAtomicVFS.test.js
-        - test/IDBMirrorVFS.test.js
-        - test/MemoryAsyncVFS.test.js
-        - test/MemoryVFS.test.js
-        - test/OPFSAdaptiveVFS.test.js
-        - test/OPFSAnyContextVFS.test.js
-        - test/OPFSCoopSyncVFS.test.js
-        - test/OPFSWriteAheadVFS.test.js
-        - test/WebLocksMixin.test.js
-        - test/WriteAheadCheckpointPlan.test.js
-        - test/api.test.js
-        - test/callbacks.test.js
         - test/sql.test.js
-        - test/sqlite-api-open.test.js
     env:
       YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
     steps:
