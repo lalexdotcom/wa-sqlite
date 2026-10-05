@@ -1,0 +1,74 @@
+name: webkit probe
+
+on:
+  push:
+    branches: [ "probe/webkit-opfs" ]
+  workflow_dispatch:
+
+jobs:
+
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        playwright: [ "1.62.1", "1.63.0" ]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+    - name: Install Playwright ${{ matrix.playwright }} and WebKit
+      working-directory: probe
+      run: |
+        npm init -y >/dev/null
+        npm install --no-save playwright@${{ matrix.playwright }}
+        npx playwright install --with-deps webkit
+    - name: Probe
+      working-directory: probe
+      run: node webkit-opfs.mjs | tee result.json
+    - name: Summary
+      working-directory: probe
+      run: |
+        echo "### Playwright ${{ matrix.playwright }}" >> $GITHUB_STEP_SUMMARY
+        echo '```json' >> $GITHUB_STEP_SUMMARY
+        cat result.json >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        file:
+        - test/AccessHandlePoolVFS.test.js
+        - test/IDBBatchAtomicVFS.test.js
+        - test/IDBMirrorVFS.test.js
+        - test/MemoryAsyncVFS.test.js
+        - test/MemoryVFS.test.js
+        - test/OPFSAdaptiveVFS.test.js
+        - test/OPFSAnyContextVFS.test.js
+        - test/OPFSCoopSyncVFS.test.js
+        - test/OPFSWriteAheadVFS.test.js
+        - test/WebLocksMixin.test.js
+        - test/WriteAheadCheckpointPlan.test.js
+        - test/api.test.js
+        - test/callbacks.test.js
+        - test/sql.test.js
+        - test/sqlite-api-open.test.js
+    env:
+      YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+    - run: yarn install
+    - run: yarn add -D @web/test-runner-playwright@1.0.0 playwright@1.63.0
+    - run: yarn playwright install --with-deps webkit
+    - name: Suite on WebKit, ${{ matrix.file }}
+      env:
+        WTR_FILES: ${{ matrix.file }}
+      run: yarn web-test-runner --config web-test-runner.webkit.config.mjs --static-logging
