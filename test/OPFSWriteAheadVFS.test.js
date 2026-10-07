@@ -11,6 +11,7 @@ const CONFIG = 'OPFSWriteAheadVFS';
 const BUILDS = ['default', 'asyncify', 'jspi'];
 
 const supportsJSPI = await TestContext.supportsJSPI();
+const supportsSyncHandleMode = await TestContext.supportsSyncHandleMode();
 
 describe(CONFIG, function() {
   for (const build of BUILDS) {
@@ -24,7 +25,7 @@ describe(CONFIG, function() {
       vfs_xClose(context);
       vfs_xRead(context);
       vfs_xWrite(context);
-      vfs_read_freshness({ build });
+      if (supportsSyncHandleMode) vfs_read_freshness({ build });
       vfs_open_cleanup(context);
     });
   }

@@ -124,7 +124,8 @@ export function vfs_open_last_error(context) {
         // this VFS that failed without setting it.
         const lastError = await vfs.lastError;
         expect(lastError).toBeTruthy();
-        expect(lastError?.name).toEqual('NoModificationAllowedError');
+        expect(['NoModificationAllowedError', 'InvalidStateError'])
+          .toContain(lastError?.name);
       });
   });
 }

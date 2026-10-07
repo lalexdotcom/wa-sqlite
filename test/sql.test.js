@@ -10,6 +10,7 @@ const ASYNC_BUILDS = ['asyncify', 'jspi'];
 
 // Not all browsers support JSPI yet.
 const supportsJSPI = await TestContext.supportsJSPI();
+const supportsSyncHandleMode = await TestContext.supportsSyncHandleMode();
 
 /** @type {Map<string, string[]>} */
 const CONFIGS = new Map([
@@ -57,7 +58,8 @@ function sqlSpecs(build, config) {
     // These tests require persistent storage.
     sql_0004(context);
   }
-  if (!SINGLE_CONNECTION.includes(config)) {
+  if (!SINGLE_CONNECTION.includes(config) &&
+      (config !== 'OPFSWriteAheadVFS' || supportsSyncHandleMode)) {
     // These tests require multiple connections.
     sql_0005(context);
   }

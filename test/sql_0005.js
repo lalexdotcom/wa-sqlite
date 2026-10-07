@@ -24,12 +24,13 @@ export function sql_0005(context) {
       for (let i = 0; i < 8; ++i) {
         const proxy = await context.create({ reset: false });
         const sqlite3 = proxy.sqlite3;
-        const db = await sqlite3.open_v2('demo');
-        instances.push({ sqlite3, db });
+        let db;
         cleanup.push(async () => {
-          await sqlite3.close(db);
+          if (db !== undefined) await sqlite3.close(db);
           await context.destroy(proxy);
         });
+        db = await sqlite3.open_v2('demo');
+        instances.push({ sqlite3, db });
 
         if (i === 0) {
           await sqlite3.exec(db, `

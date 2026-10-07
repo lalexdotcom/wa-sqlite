@@ -40,13 +40,18 @@ export class TestContext {
     }
 
     const worker = new Worker(url, { type: 'module' });
-    const port = await new Promise(resolve => {
+    const port = await new Promise((resolve, reject) => {
       worker.addEventListener('message', (event) => {
         if (event.ports[0]) {
           return resolve(event.ports[0]);
         }
+        worker.terminate();
         const e = new Error(event.data.message);
-        throw Object.assign(e, event.data);
+        reject(Object.assign(e, event.data));
+      }, { once: true });
+      worker.addEventListener('error', (event) => {
+        worker.terminate();
+        reject(new Error(`test worker failed: ${event.message}`));
       }, { once: true });
     });
 
@@ -63,11 +68,39 @@ export class TestContext {
   }
 
   async destroy(proxy) {
+    // Close the VFS before the worker is terminated, so storage handles
+    // and IndexedDB connections are released rather than abandoned.
+    try {
+      await Promise.race([
+        proxy.vfs.close?.(),
+        new Promise(resolve => setTimeout(resolve, 2000))
+      ]);
+    } catch (e) {
+    }
     proxy[Comlink.releaseProxy]();
     const releaser = mapProxyToReleaser.get(proxy);
     if (releaser) {
       workerFinalization.unregister(releaser);
       releaser();
+    }
+  }
+
+  /**
+   * Whether FileSystemSyncAccessHandle accepts a mode (readwrite-unsafe),
+   * which multiple connections to an OPFS database require.
+   */
+  static async supportsSyncHandleMode() {
+    const src = `postMessage(typeof FileSystemSyncAccessHandle === 'function' &&
+      'mode' in FileSystemSyncAccessHandle.prototype)`;
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    try {
+      return await new Promise(resolve => {
+        worker.addEventListener('message', ({ data }) => resolve(data), { once: true });
+      });
+    } finally {
+      worker.terminate();
+      URL.revokeObjectURL(url);
     }
   }
 

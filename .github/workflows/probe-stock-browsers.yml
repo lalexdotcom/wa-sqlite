@@ -1,0 +1,33 @@
+# Throwaway probe: the whole suite on stock Chrome and Firefox through
+# WebDriver and on Playwright's WebKit, on Linux and Windows.
+name: stock browsers probe
+
+on:
+  push:
+    branches: [ "probe/stock-browsers" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        browser: [chrome, firefox, webkit]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+    - run: yarn install
+    - if: matrix.browser == 'webkit'
+      run: yarn playwright install --with-deps webkit
+    - name: Test with checked-in WASM files
+      run: yarn test
+      env:
+        WTR_BROWSERS: ${{ matrix.browser }}
