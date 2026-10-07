@@ -1,5 +1,6 @@
-# Throwaway probe: the whole suite on stock Chrome and Firefox through
-# WebDriver and on Playwright's WebKit, on Linux and Windows.
+# Throwaway probe, second pass: Firefox on Windows one file at a time, to
+# name the file that hangs; Firefox on Linux five times, to measure how
+# often the WebDriver launcher loses a file.
 name: stock browsers probe
 
 on:
@@ -12,28 +13,43 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        browser: [chrome, firefox, webkit]
+        include:
+        - { os: windows-latest, browser: firefox, mode: per-file, attempt: 1 }
+        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 1 }
+        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 2 }
+        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 3 }
+        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 4 }
+        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 5 }
+    name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.mode }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
+    env:
+      WTR_BROWSERS: ${{ matrix.browser }}
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
       with:
         node-version: 22.x
     - run: yarn install
-    - if: matrix.browser == 'webkit'
-      run: yarn playwright install --with-deps webkit
     - if: runner.os == 'Windows' && matrix.browser == 'firefox'
       run: |
-        env | grep -i -E 'gecko|webdriver' || true
-        ls /c/SeleniumWebDrivers/* 2>/dev/null || true
         driver=$(command -v geckodriver || ls /c/SeleniumWebDrivers/GeckoDriver/geckodriver.exe)
         echo "GECKODRIVER_PATH=$(cygpath -w "$driver")" | tee -a "$GITHUB_ENV"
-    - name: Test with checked-in WASM files
+    - if: matrix.mode == 'per-file'
+      run: probe/per-file.sh
+    - if: matrix.mode == 'suite'
       run: yarn test
       env:
-        WTR_BROWSERS: ${{ matrix.browser }}
+        WDIO_LOG_LEVEL: info
+        WDIO_OUTPUT_DIR: probe/wdio-logs
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: logs-${{ matrix.os }}-${{ matrix.browser }}-${{ matrix.mode }}-${{ matrix.attempt }}
+        path: |
+          probe/logs
+          probe/wdio-logs
+        if-no-files-found: ignore

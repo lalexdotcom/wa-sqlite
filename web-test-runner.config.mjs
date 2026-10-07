@@ -1,6 +1,6 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { webdriverLauncher } from '@web/test-runner-webdriver';
 import { playwrightLauncher } from '@web/test-runner-playwright';
 import { webkit } from 'playwright';
@@ -8,8 +8,15 @@ import { jasmineTestRunnerConfig } from 'web-test-runner-jasmine';
 
 // Throwaway probe: stock Chrome and Firefox through WebDriver, WebKit through
 // Playwright. WTR_BROWSERS=chrome,firefox,webkit picks a subset.
+// WebdriverIO's own logs, for the launcher-level failures.
+const WDIO = {
+  logLevel: process.env.WDIO_LOG_LEVEL ?? 'warn',
+  ...(process.env.WDIO_OUTPUT_DIR ? { outputDir: process.env.WDIO_OUTPUT_DIR } : {}),
+};
+
 const LAUNCHERS = {
   chrome: () => webdriverLauncher({
+    ...WDIO,
     capabilities: {
       browserName: 'chrome',
       'goog:chromeOptions': {
@@ -19,6 +26,7 @@ const LAUNCHERS = {
     },
   }),
   firefox: () => webdriverLauncher({
+    ...WDIO,
     capabilities: {
       browserName: 'firefox',
       'moz:firefoxOptions': {
@@ -45,6 +53,18 @@ for (const name of names) {
   if (!LAUNCHERS[name]) throw new Error(`WTR_BROWSERS: unknown browser "${name}"`);
 }
 
+// WTR_TRACE=1 wraps each file with probe/spec-reporter.js.
+function testFiles() {
+  const files = process.env.WTR_FILES ? process.env.WTR_FILES.split(',') : ['./test/*.test.js'];
+  if (!process.env.WTR_TRACE) return files;
+  mkdirSync('probe/wrapped', { recursive: true });
+  return files.map(file => {
+    const wrapper = `probe/wrapped/${basename(file)}`;
+    writeFileSync(wrapper, `import '../spec-reporter.js';\nimport '../../${file.replaceAll('\\', '/')}';\n`);
+    return wrapper;
+  });
+}
+
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   ...jasmineTestRunnerConfig(),
   testFramework: {
@@ -56,7 +76,16 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   browserStartTimeout: 60_000,
   testsFinishTimeout: 20 * 60 * 1000,
   nodeResolve: true,
-  files: process.env.WTR_FILES ? process.env.WTR_FILES.split(',') : ['./test/*.test.js'],
+  files: testFiles(),
+  middleware: [
+    async (ctx, next) => {
+      if (ctx.path !== '/__probe-log') return next();
+      let body = '';
+      for await (const chunk of ctx.req) body += chunk;
+      process.stdout.write(`PROBE-SPEC ${new Date().toISOString()} ${body}\n`);
+      ctx.status = 204;
+    },
+  ],
   concurrency: 1,
   concurrentBrowsers: 1,
   browsers: names.map(name => LAUNCHERS[name]()),
