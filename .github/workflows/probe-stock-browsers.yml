@@ -27,6 +27,8 @@ jobs:
     - run: yarn install
     - if: matrix.browser == 'webkit'
       run: yarn playwright install --with-deps webkit
+    - if: runner.os == 'Windows' && matrix.browser == 'firefox'
+      run: echo "GECKODRIVER_PATH=$GECKOWEBDRIVER\\geckodriver.exe" >> "$GITHUB_ENV"
     - name: Test with checked-in WASM files
       run: yarn test
       env:

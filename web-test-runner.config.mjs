@@ -25,6 +25,10 @@ const LAUNCHERS = {
         args: ['-headless'],
         ...(process.env.FIREFOX_PATH ? { binary: process.env.FIREFOX_PATH } : {}),
       },
+      // WebdriverIO's geckodriver download fails under Yarn PnP on Windows.
+      ...(process.env.GECKODRIVER_PATH
+        ? { 'wdio:geckodriverOptions': { binary: process.env.GECKODRIVER_PATH } }
+        : {}),
     },
   }),
   // Playwright's WebKit has OPFS only in a persistent context.
