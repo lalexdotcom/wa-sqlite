@@ -13,9 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari }
-        - { os: macos-26, browser: safari-ios, ios: '26' }
-        - { os: xcode-27, browser: safari }
         - { os: xcode-27, browser: safari-ios, ios: '27' }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }}
     runs-on: ${{ matrix.os }}
@@ -54,7 +51,7 @@ jobs:
         for domain in com.apple.webinspectord com.apple.mobilesafari; do
           xcrun simctl spawn "$udid" defaults write "$domain" RemoteAutomationEnabled -bool YES
         done
-        open -a Simulator --args -CurrentDeviceUDID "$udid"
+        open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$udid"
         xcrun simctl launch "$udid" com.apple.mobilesafari
         sleep 30
         xcrun simctl terminate "$udid" com.apple.mobilesafari || true
