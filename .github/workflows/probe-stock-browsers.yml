@@ -51,7 +51,7 @@ jobs:
         for domain in com.apple.webinspectord com.apple.mobilesafari; do
           xcrun simctl spawn "$udid" defaults write "$domain" RemoteAutomationEnabled -bool YES
         done
-        open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$udid"
+        open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$udid" || echo "no Simulator.app"
         xcrun simctl launch "$udid" com.apple.mobilesafari
         sleep 30
         xcrun simctl terminate "$udid" com.apple.mobilesafari || true
