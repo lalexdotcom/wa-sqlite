@@ -14,7 +14,6 @@ jobs:
       matrix:
         include:
         - { os: macos-26, browser: safari, attempt: 1, files: test/sql.test.js }
-        - { os: macos-26, browser: safari, attempt: 2, files: test/sql.test.js }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -102,11 +101,19 @@ jobs:
         mkdir -p probe/crash
         for dir in ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports; do
           sudo find "$dir" -type f -newer "$RUNNER_TEMP/crash-marker" 2>/dev/null
-        done | while read -r f; do
+        done | tee /dev/stderr | while read -r f; do
           echo "=== $f"
           sudo cp "$f" probe/crash/ && sudo chmod a+r "probe/crash/$(basename "$f")"
           sudo head -c 6000 "$f"; echo
         done
+    - if: always() && runner.os == 'macOS'
+      name: WebKit unified log
+      run: |
+        sudo log show --last 20m --style compact \
+          --predicate 'subsystem BEGINSWITH "com.apple.WebKit" OR process BEGINSWITH "com.apple.WebKit" OR process == "Safari" OR process == "safaridriver"' \
+          > probe/crash/webkit-unified.log 2>&1 || true
+        wc -l probe/crash/webkit-unified.log
+        grep -i -E 'memory|jetsam|terminat|killed|crash|exceeded|limit|didClose|gpu' probe/crash/webkit-unified.log | tail -n 80 || true
     - if: always()
       uses: actions/upload-artifact@v4
       with:
