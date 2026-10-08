@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { globSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { webdriverLauncher } from '@web/test-runner-webdriver';
@@ -72,7 +72,7 @@ function testFiles() {
   const files = process.env.WTR_FILES ? process.env.WTR_FILES.split(',') : ['./test/*.test.js'];
   if (!process.env.WTR_TRACE) return files;
   mkdirSync('probe/wrapped', { recursive: true });
-  return files.map(file => {
+  return files.flatMap(pattern => globSync(pattern)).map(file => {
     const wrapper = `probe/wrapped/${basename(file)}`;
     writeFileSync(wrapper, `import '../spec-reporter.js';\nimport '../../${file.replaceAll('\\', '/')}';\n`);
     return wrapper;

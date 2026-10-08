@@ -14,9 +14,9 @@ jobs:
       matrix:
         include:
         - { os: macos-26, browser: safari }
-        - { os: macos-26, browser: safari-ios, ios: '26.5' }
+        - { os: macos-26, browser: safari-ios, ios: '26' }
         - { os: xcode-27, browser: safari }
-        - { os: xcode-27, browser: safari-ios, ios: '27.2' }
+        - { os: xcode-27, browser: safari-ios, ios: '27' }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -41,7 +41,8 @@ jobs:
       run: |
         xcrun simctl list runtimes
         runtime=$(xcrun simctl list runtimes -j | jq -r --arg v "${{ matrix.ios }}" \
-          '.runtimes[] | select(.platform == "iOS" and .isAvailable and (.version | startswith($v))) | .identifier' | head -1)
+          '.runtimes[] | select(.platform == "iOS" and .isAvailable and (.version | startswith($v))) | "\(.version) \(.identifier)"' \
+          | sort -V | tail -1 | cut -d' ' -f2)
         udid=$(xcrun simctl list devices available -j | jq -r --arg r "$runtime" \
           '.devices[$r][] | select(.name | startswith("iPhone")) | .udid' | head -1)
         echo "runtime=$runtime udid=$udid"
