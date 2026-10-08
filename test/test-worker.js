@@ -125,7 +125,10 @@ if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
     if (m && m.blocks instanceof Map) for (const v of m.blocks.values()) n += v?.byteLength ?? 0;
     return n / 1024;
   };
-  const Original = globalThis.BroadcastChannel;
+  const Original = arm === 'nobcobj'
+    // An inert stand-in: no channel exists at all.
+    ? class extends EventTarget { constructor() { super(); } postMessage() {} close() {} }
+    : globalThis.BroadcastChannel;
   globalThis.BroadcastChannel = class extends Original {
     constructor(name) {
       super(name);
