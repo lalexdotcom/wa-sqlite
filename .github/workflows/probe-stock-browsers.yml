@@ -13,7 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari, attempt: 1, files: test/sql.test.js }
+        - { os: macos-26, browser: safari, attempt: current, files: test/sql.test.js, mode: current }
+        - { os: macos-26, browser: safari, attempt: reuse, files: test/sql.test.js, mode: reuse }
+        - { os: macos-26, browser: safari, attempt: backoff, files: test/sql.test.js, mode: backoff }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -92,6 +94,7 @@ jobs:
       run: yarn test
       env:
         WTR_FILES: ${{ matrix.files }}
+        SQL0005_MODE: ${{ matrix.mode }}
         WTR_TRACE: '1'
         WDIO_LOG_LEVEL: info
         WDIO_OUTPUT_DIR: probe/wdio-logs
@@ -113,7 +116,7 @@ jobs:
           --predicate 'subsystem BEGINSWITH "com.apple.WebKit" OR process BEGINSWITH "com.apple.WebKit" OR process == "Safari" OR process == "safaridriver"' \
           > probe/crash/webkit-unified.log 2>&1 || true
         wc -l probe/crash/webkit-unified.log
-        grep -i -E 'memory|jetsam|terminat|killed|crash|exceeded|limit|didClose|gpu' probe/crash/webkit-unified.log | tail -n 80 || true
+        grep -E 'Current memory footprint|Killed|reason=ExceededMemoryLimit|Too many messages' probe/crash/webkit-unified.log | grep -v 'Current memory footprint: [0-9] MB' | cut -c1-220 | tail -n 60 || true
     - if: always()
       uses: actions/upload-artifact@v4
       with:

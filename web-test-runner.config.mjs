@@ -75,7 +75,10 @@ function testFiles() {
   mkdirSync('probe/wrapped', { recursive: true });
   return files.flatMap(pattern => globSync(pattern)).map(file => {
     const wrapper = `probe/wrapped/${basename(file)}`;
-    writeFileSync(wrapper, `import '../spec-reporter.js';\nimport '../../${file.replaceAll('\\', '/')}';\n`);
+    // Imports run before a module's own code, so the mode is a module too.
+    writeFileSync('probe/wrapped/mode.js',
+      `globalThis.__SQL0005_MODE = ${JSON.stringify(process.env.SQL0005_MODE ?? 'current')};\n`);
+    writeFileSync(wrapper, `import './mode.js';\nimport '../spec-reporter.js';\nimport '../../${file.replaceAll('\\', '/')}';\n`);
     return wrapper;
   });
 }

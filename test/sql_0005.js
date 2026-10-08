@@ -56,21 +56,47 @@ export function sql_0005(context) {
         }
       }));
 
+      report('done');
       expect(values.size).toBe(instances.length * iterations);
       expect(Array.from(values).sort((a, b) => b - a).at(0)).toBe(values.size);
     });
   });
 }
 
-async function transact({ sqlite3, db }, sql) {
+// Throwaway probe: globalThis.__SQL0005_MODE picks how a locked
+// transaction is retried; attempts are reported live.
+const MODE = globalThis.__SQL0005_MODE ?? 'current';
+let attempts = 0;
+let proxies = 0;
+const report = (what) => fetch('/__probe-log', {
+  method: 'POST', keepalive: true,
+  body: `SQL0005 mode=${MODE} ${what} attempts=${attempts} proxies=${proxies}`,
+}).catch(() => {});
+
+async function transact(instance, sql) {
+  const { sqlite3, db } = instance;
   while (true) {
+    ++attempts;
+    if (attempts % 500 === 0) report('progress');
     try {
       const rows = [];
-      await sqlite3.exec(db, sql, Comlink.proxy(row => rows.push(row)));
+      let callback;
+      if (MODE === 'reuse') {
+        instance.onRow ??= (++proxies, Comlink.proxy(row => instance.rows.push(row)));
+        instance.rows = rows;
+        callback = instance.onRow;
+      } else {
+        ++proxies;
+        callback = Comlink.proxy(row => rows.push(row));
+      }
+      await sqlite3.exec(db, sql, callback);
       return rows;
     } catch (e) {
       if (e.message !== 'database is locked') {
         throw e;
+      }
+      if (MODE === 'backoff') {
+        await new Promise(resolve => setTimeout(resolve, 1 + Math.random() * 4));
       }
     }
   }
