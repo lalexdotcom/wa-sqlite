@@ -13,11 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari, attempt: 1 }
-        - { os: macos-26, browser: safari, attempt: 2 }
-        - { os: macos-26, browser: safari, attempt: 3 }
-        - { os: macos-26, browser: safari-ios, ios: '26', attempt: 1 }
-        - { os: ubuntu-latest, browser: chrome, attempt: 1 }
+        - { os: macos-26, browser: safari, attempt: 1, files: test/sql.test.js }
+        - { os: macos-26, browser: safari, attempt: 2, files: test/sql.test.js }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -84,6 +81,8 @@ jobs:
         kill %1 || true
         ls -la ~/Library/Logs/com.apple.WebDriver/ || true
         tail -n 80 ~/Library/Logs/com.apple.WebDriver/* 2>/dev/null || true
+    - if: runner.os == 'macOS'
+      run: touch "$RUNNER_TEMP/crash-marker"
     - name: Capabilities
       timeout-minutes: 15
       run: |
@@ -93,9 +92,21 @@ jobs:
       name: Test with checked-in WASM files
       run: yarn test
       env:
+        WTR_FILES: ${{ matrix.files }}
         WTR_TRACE: '1'
         WDIO_LOG_LEVEL: info
         WDIO_OUTPUT_DIR: probe/wdio-logs
+    - if: always() && runner.os == 'macOS'
+      name: Crash reports
+      run: |
+        mkdir -p probe/crash
+        for dir in ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports; do
+          sudo find "$dir" -type f -newer "$RUNNER_TEMP/crash-marker" 2>/dev/null
+        done | while read -r f; do
+          echo "=== $f"
+          sudo cp "$f" probe/crash/ && sudo chmod a+r "probe/crash/$(basename "$f")"
+          sudo head -c 6000 "$f"; echo
+        done
     - if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -104,4 +115,5 @@ jobs:
           probe-capabilities.log
           probe/wdio-logs
           ~/Library/Logs/com.apple.WebDriver
+          probe/crash
         if-no-files-found: ignore
