@@ -59,6 +59,14 @@ const VFS_CONFIGS = new Map([
 
 const INDEXEDDB_DBNAMES = ['demo'];
 
+// Methods whose argument at this index is an output DataView.
+const OUTPUT_DATAVIEW_ARG = {
+  jOpen: 3,
+  jAccess: 2,
+  jFileSize: 1,
+  jCheckReservedLock: 1,
+};
+
 const searchParams = new URLSearchParams(location.search);
 
 maybeReset().then(async () => {
@@ -109,6 +117,23 @@ maybeReset().then(async () => {
       const value = Reflect.get(target, p, receiver);
       if (typeof value === 'function') {
         return async (...args) => {
+          const outIndex = OUTPUT_DATAVIEW_ARG[p];
+          if (outIndex !== undefined && args[outIndex]) {
+            // The output DataView is a proxy, so a write to it is a message
+            // on its own channel, unordered with the reply to this call.
+            // Pass a local DataView and copy it back before replying.
+            const proxyView = args[outIndex];
+            const local = new DataView(new ArrayBuffer(await proxyView.byteLength));
+            for (let i = 0; i < local.byteLength; ++i) {
+              local.setUint8(i, await proxyView.getUint8(i));
+            }
+            args[outIndex] = local;
+            const result = await value.apply(target, args);
+            for (let i = 0; i < local.byteLength; ++i) {
+              await proxyView.setUint8(i, local.getUint8(i));
+            }
+            return result;
+          }
           if (p === 'jRead') {
             // The read buffer Uint8Array will be passed by proxy so all
             // access is asynchronous. Pass a local buffer to the VFS
