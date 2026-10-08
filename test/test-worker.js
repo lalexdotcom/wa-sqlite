@@ -65,12 +65,53 @@ if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
   const arm = new URLSearchParams(location.search).get('probeArm') ?? 'base';
   const c = { bcSent: 0, bcSentKB: 0, bcRecv: 0, bcRecvKB: 0, portSent: 0, portRecv: 0,
     lockReq: 0, lockDenied: 0, lockQuery: 0, idbTx: 0, idbTxRW: 0 };
+  const pendingLocks = new Map();
+  const pendingIdb = new Map();
+  let seq = 0;
+  globalThis.__probePendingVfs = new Map();
   const lockReq = LockManager.prototype.request;
   LockManager.prototype.request = function(name, ...rest) {
     c.lockReq++;
+    const key = ++seq;
+    const opts = rest.length > 1 ? rest[0] : {};
+    pendingLocks.set(key, { name, mode: opts.mode ?? 'exclusive', poll: !!opts.ifAvailable, t: performance.now() });
     const fn = rest.at(-1);
-    rest[rest.length - 1] = (lock) => { if (!lock) c.lockDenied++; return fn(lock); };
+    rest[rest.length - 1] = (lock) => {
+      pendingLocks.delete(key);
+      if (!lock) c.lockDenied++;
+      return fn(lock);
+    };
     return lockReq.call(this, name, ...rest);
+  };
+  for (const [proto, methods] of [
+    [IDBObjectStore.prototype, ['get', 'getAll', 'put', 'delete', 'getAllKeys']],
+    [IDBIndex.prototype, ['get', 'getAll']],
+  ]) {
+    for (const m of methods) {
+      const orig = proto[m];
+      proto[m] = function(...a) {
+        const req = orig.apply(this, a);
+        const key = ++seq;
+        pendingIdb.set(key, { m, t: performance.now() });
+        const done = () => pendingIdb.delete(key);
+        req.addEventListener('success', done);
+        req.addEventListener('error', done);
+        return req;
+      };
+    }
+  }
+  const age = (t) => ((performance.now() - t) / 1000).toFixed(1);
+  globalThis.__probeDetail = async () => {
+    const vfs = [...globalThis.__probePendingVfs.values()].map(v => `${v.p}(${v.a})@${age(v.t)}`).join(',');
+    const locks = [...pendingLocks.values()].map(l => `${l.name.replace(/^.*@@/, '')}:${l.mode[0]}${l.poll ? '?' : ''}@${age(l.t)}`).join(',');
+    const idb = [...pendingIdb.values()].map(r => `${r.m}@${age(r.t)}`).join(',');
+    let held = '', waiting = '';
+    try {
+      const q = await lockQuery.call(navigator.locks);
+      held = q.held.map(l => `${l.name.replace(/^.*@@/, '')}:${l.mode[0]}:${l.clientId.slice(-4)}`).join(',');
+      waiting = q.pending.map(l => `${l.name.replace(/^.*@@/, '')}:${l.mode[0]}:${l.clientId.slice(-4)}`).join(',');
+    } catch (e) { held = `query failed ${e}`; }
+    return `vfs=[${vfs}] locks=[${locks}] idb=[${idb}] HELD=[${held}] WAIT=[${waiting}]`;
   };
   const lockQuery = LockManager.prototype.query;
   LockManager.prototype.query = function(...a) { c.lockQuery++; return lockQuery.apply(this, a); };
@@ -106,7 +147,7 @@ if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
   const t0 = performance.now();
   setInterval(() => {
     const r = Object.entries(c).map(([k, v]) => `${k}=${Math.round(v)}`).join(' ');
-    fetch('/__probe-log', { method: 'POST', body: `TRAFFIC arm=${arm} worker=${id} t=${((performance.now() - t0) / 1000).toFixed(0)} ${r}` }).catch(() => {});
+    globalThis.__probeDetail().then(detail => fetch('/__probe-log', { method: 'POST', body: `TRAFFIC arm=${arm} worker=${id} t=${((performance.now() - t0) / 1000).toFixed(0)} ${r} ${detail}` })).catch(() => {});
   }, 2000);
 }
 
@@ -138,6 +179,23 @@ maybeReset().then(async () => {
       const vfsArgs = (config.vfsArgs ?? ['demo', MODULE])
         .map(arg => arg === MODULE ? module : arg);
       const vfs = await namespace[className].create(...vfsArgs);
+      if (globalThis.__probePendingVfs) {
+        // Throwaway probe: track the VFS calls SQLite has in flight.
+        for (const name of ['jOpen', 'jLock', 'jUnlock', 'jRead', 'jWrite', 'jSync', 'jTruncate',
+                            'jFileSize', 'jCheckReservedLock', 'jFileControl', 'jClose', 'jAccess', 'jDelete']) {
+          const orig = vfs[name];
+          if (typeof orig !== 'function') continue;
+          const track = (a) => {
+            const key = Symbol();
+            globalThis.__probePendingVfs.set(key, { p: name, a: name === 'jLock' || name === 'jUnlock' ? a[1] : '', t: performance.now() });
+            return () => globalThis.__probePendingVfs.delete(key);
+          };
+          // FacadeVFS tells async methods apart by their constructor.
+          vfs[name] = orig.constructor.name === 'AsyncFunction'
+            ? async function(...a) { const done = track(a); try { return await orig.apply(this, a); } finally { done(); } }
+            : function(...a) { const done = track(a); try { return orig.apply(this, a); } finally { done(); } };
+        }
+      }
       sqlite3.vfs_register(vfs, true);
       return vfs;
     }

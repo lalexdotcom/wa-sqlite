@@ -13,9 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari, attempt: s26-base, files: test/probe-mirror.test.js, mode: current, arm: base }
-        - { os: macos-26, browser: safari, attempt: s26-nobc, files: test/probe-mirror.test.js, mode: current, arm: nobc }
-        - { os: xcode-27, browser: safari, attempt: s27-base, files: test/probe-mirror.test.js, mode: current, arm: base }
+        - { os: macos-26, browser: safari, attempt: s26-a, files: test/probe-mirror.test.js, mode: current, arm: base }
+        - { os: macos-26, browser: safari, attempt: s26-b, files: test/probe-mirror.test.js, mode: current, arm: base }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
