@@ -59,6 +59,37 @@ const VFS_CONFIGS = new Map([
 
 const INDEXEDDB_DBNAMES = ['demo'];
 
+// Throwaway probe: message traffic in IDBMirrorVFS workers, reported live.
+if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
+  const id = Math.random().toString(36).slice(2, 6);
+  const c = { bcSent: 0, bcSentKB: 0, bcRecv: 0, bcRecvKB: 0, portSent: 0, portRecv: 0 };
+  const kb = (m) => {
+    let n = 0;
+    if (m && m.blocks instanceof Map) for (const v of m.blocks.values()) n += v?.byteLength ?? 0;
+    return n / 1024;
+  };
+  const Original = globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel = class extends Original {
+    constructor(name) {
+      super(name);
+      super.addEventListener('message', (e) => { c.bcRecv++; c.bcRecvKB += kb(e.data); });
+    }
+    postMessage(m) { c.bcSent++; c.bcSentKB += kb(m); return super.postMessage(m); }
+  };
+  const portPost = MessagePort.prototype.postMessage;
+  MessagePort.prototype.postMessage = function(...args) { c.portSent++; return portPost.apply(this, args); };
+  const portAdd = MessagePort.prototype.addEventListener;
+  MessagePort.prototype.addEventListener = function(type, fn, ...rest) {
+    if (type !== 'message') return portAdd.call(this, type, fn, ...rest);
+    return portAdd.call(this, type, function(e) { c.portRecv++; return fn.call(this, e); }, ...rest);
+  };
+  const t0 = performance.now();
+  setInterval(() => {
+    const r = Object.entries(c).map(([k, v]) => `${k}=${Math.round(v)}`).join(' ');
+    fetch('/__probe-log', { method: 'POST', body: `TRAFFIC worker=${id} t=${((performance.now() - t0) / 1000).toFixed(0)} ${r}` }).catch(() => {});
+  }, 2000);
+}
+
 // Methods whose argument at this index is an output DataView.
 const OUTPUT_DATAVIEW_ARG = {
   jOpen: 3,

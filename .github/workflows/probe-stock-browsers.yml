@@ -13,9 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari, attempt: current, files: test/sql.test.js, mode: current }
-        - { os: macos-26, browser: safari, attempt: reuse, files: test/sql.test.js, mode: reuse }
-        - { os: macos-26, browser: safari, attempt: backoff, files: test/sql.test.js, mode: backoff }
+        - { os: macos-26, browser: safari, attempt: s26, files: test/sql.test.js, mode: current }
+        - { os: xcode-27, browser: safari, attempt: s27, files: test/sql.test.js, mode: current }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
