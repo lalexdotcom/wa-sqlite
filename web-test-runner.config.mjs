@@ -77,7 +77,8 @@ function testFiles() {
     const wrapper = `probe/wrapped/${basename(file)}`;
     // Imports run before a module's own code, so the mode is a module too.
     writeFileSync('probe/wrapped/mode.js',
-      `globalThis.__SQL0005_MODE = ${JSON.stringify(process.env.SQL0005_MODE ?? 'current')};\n`);
+      `globalThis.__SQL0005_MODE = ${JSON.stringify(process.env.SQL0005_MODE ?? 'current')};\n` +
+      `globalThis.__PROBE_ARM = ${JSON.stringify(process.env.PROBE_ARM ?? 'base')};\n`);
     writeFileSync(wrapper, `import './mode.js';\nimport '../spec-reporter.js';\nimport '../../${file.replaceAll('\\', '/')}';\n`);
     return wrapper;
   });

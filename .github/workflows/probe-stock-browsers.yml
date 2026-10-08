@@ -13,8 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: macos-26, browser: safari, attempt: s26, files: test/sql.test.js, mode: current }
-        - { os: xcode-27, browser: safari, attempt: s27, files: test/sql.test.js, mode: current }
+        - { os: macos-26, browser: safari, attempt: s26-base, files: test/probe-mirror.test.js, mode: current, arm: base }
+        - { os: macos-26, browser: safari, attempt: s26-nobc, files: test/probe-mirror.test.js, mode: current, arm: nobc }
+        - { os: xcode-27, browser: safari, attempt: s27-base, files: test/probe-mirror.test.js, mode: current, arm: base }
     name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }} ${{ matrix.attempt }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -94,6 +95,7 @@ jobs:
       env:
         WTR_FILES: ${{ matrix.files }}
         SQL0005_MODE: ${{ matrix.mode }}
+        PROBE_ARM: ${{ matrix.arm }}
         WTR_TRACE: '1'
         WDIO_LOG_LEVEL: info
         WDIO_OUTPUT_DIR: probe/wdio-logs

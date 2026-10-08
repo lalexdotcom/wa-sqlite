@@ -62,7 +62,23 @@ const INDEXEDDB_DBNAMES = ['demo'];
 // Throwaway probe: message traffic in IDBMirrorVFS workers, reported live.
 if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
   const id = Math.random().toString(36).slice(2, 6);
-  const c = { bcSent: 0, bcSentKB: 0, bcRecv: 0, bcRecvKB: 0, portSent: 0, portRecv: 0 };
+  const arm = new URLSearchParams(location.search).get('probeArm') ?? 'base';
+  const c = { bcSent: 0, bcSentKB: 0, bcRecv: 0, bcRecvKB: 0, portSent: 0, portRecv: 0,
+    lockReq: 0, lockDenied: 0, lockQuery: 0, idbTx: 0, idbTxRW: 0 };
+  const lockReq = LockManager.prototype.request;
+  LockManager.prototype.request = function(name, ...rest) {
+    c.lockReq++;
+    const fn = rest.at(-1);
+    rest[rest.length - 1] = (lock) => { if (!lock) c.lockDenied++; return fn(lock); };
+    return lockReq.call(this, name, ...rest);
+  };
+  const lockQuery = LockManager.prototype.query;
+  LockManager.prototype.query = function(...a) { c.lockQuery++; return lockQuery.apply(this, a); };
+  const idbTransaction = IDBDatabase.prototype.transaction;
+  IDBDatabase.prototype.transaction = function(stores, mode, ...rest) {
+    c.idbTx++; if (mode === 'readwrite') c.idbTxRW++;
+    return idbTransaction.call(this, stores, mode, ...rest);
+  };
   const kb = (m) => {
     let n = 0;
     if (m && m.blocks instanceof Map) for (const v of m.blocks.values()) n += v?.byteLength ?? 0;
@@ -74,7 +90,11 @@ if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
       super(name);
       super.addEventListener('message', (e) => { c.bcRecv++; c.bcRecvKB += kb(e.data); });
     }
-    postMessage(m) { c.bcSent++; c.bcSentKB += kb(m); return super.postMessage(m); }
+    postMessage(m) {
+      c.bcSent++; c.bcSentKB += kb(m);
+      if (arm === 'nobc') return;
+      return super.postMessage(m);
+    }
   };
   const portPost = MessagePort.prototype.postMessage;
   MessagePort.prototype.postMessage = function(...args) { c.portSent++; return portPost.apply(this, args); };
@@ -86,7 +106,7 @@ if (new URLSearchParams(location.search).get('config') === 'IDBMirrorVFS') {
   const t0 = performance.now();
   setInterval(() => {
     const r = Object.entries(c).map(([k, v]) => `${k}=${Math.round(v)}`).join(' ');
-    fetch('/__probe-log', { method: 'POST', body: `TRAFFIC worker=${id} t=${((performance.now() - t0) / 1000).toFixed(0)} ${r}` }).catch(() => {});
+    fetch('/__probe-log', { method: 'POST', body: `TRAFFIC arm=${arm} worker=${id} t=${((performance.now() - t0) / 1000).toFixed(0)} ${r}` }).catch(() => {});
   }, 2000);
 }
 
