@@ -30,6 +30,7 @@ jobs:
     - uses: actions/setup-node@v4
       with:
         node-version: 22.x
+        check-latest: true
     - run: yarn install
     - timeout-minutes: 5
       run: |
@@ -49,6 +50,10 @@ jobs:
         xcrun simctl list devices available -j | jq -r --arg r "$runtime" '.devices[$r][] | "\(.name) \(.udid)"'
         xcrun simctl boot "$udid"
         xcrun simctl bootstatus "$udid"
+        # Settings > Safari > Advanced > Remote Automation, which safaridriver needs.
+        for domain in com.apple.webinspectord com.apple.mobilesafari; do
+          xcrun simctl spawn "$udid" defaults write "$domain" RemoteAutomationEnabled -bool YES
+        done
         echo "IOS_UDID=$udid" >> "$GITHUB_ENV"
     - name: Capabilities
       timeout-minutes: 15
