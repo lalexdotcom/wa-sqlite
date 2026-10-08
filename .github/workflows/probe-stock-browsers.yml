@@ -1,6 +1,5 @@
-# Throwaway probe, second pass: Firefox on Windows one file at a time, to
-# name the file that hangs; Firefox on Linux five times, to measure how
-# often the WebDriver launcher loses a file.
+# Throwaway probe, third pass: Safari on macOS and in the iOS simulator,
+# through safaridriver, on the macOS 26 image and on the macOS 27 one.
 name: stock browsers probe
 
 on:
@@ -14,13 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { os: windows-latest, browser: firefox, mode: per-file, attempt: 1 }
-        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 1 }
-        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 2 }
-        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 3 }
-        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 4 }
-        - { os: ubuntu-latest, browser: firefox, mode: suite, attempt: 5 }
-    name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.mode }} ${{ matrix.attempt }}
+        - { os: macos-26, browser: safari }
+        - { os: macos-26, browser: safari-ios, ios: '26.5' }
+        - { os: xcode-27, browser: safari }
+        - { os: xcode-27, browser: safari-ios, ios: '27.2' }
+    name: ${{ matrix.os }} ${{ matrix.browser }} ${{ matrix.ios }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     defaults:
@@ -34,22 +31,40 @@ jobs:
       with:
         node-version: 22.x
     - run: yarn install
-    - if: runner.os == 'Windows' && matrix.browser == 'firefox'
+    - run: |
+        sw_vers
+        /Applications/Safari.app/Contents/MacOS/Safari --version 2>/dev/null || defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString
+        sudo safaridriver --enable
+    - if: matrix.ios
+      timeout-minutes: 15
       run: |
-        driver=$(command -v geckodriver || ls /c/SeleniumWebDrivers/GeckoDriver/geckodriver.exe)
-        echo "GECKODRIVER_PATH=$(cygpath -w "$driver")" | tee -a "$GITHUB_ENV"
-    - if: matrix.mode == 'per-file'
-      run: probe/per-file.sh
-    - if: matrix.mode == 'suite'
+        xcrun simctl list runtimes
+        runtime=$(xcrun simctl list runtimes -j | jq -r --arg v "${{ matrix.ios }}" \
+          '.runtimes[] | select(.platform == "iOS" and .isAvailable and (.version | startswith($v))) | .identifier' | head -1)
+        udid=$(xcrun simctl list devices available -j | jq -r --arg r "$runtime" \
+          '.devices[$r][] | select(.name | startswith("iPhone")) | .udid' | head -1)
+        echo "runtime=$runtime udid=$udid"
+        xcrun simctl list devices available -j | jq -r --arg r "$runtime" '.devices[$r][] | "\(.name) \(.udid)"'
+        xcrun simctl boot "$udid"
+        xcrun simctl bootstatus "$udid"
+        echo "IOS_UDID=$udid" >> "$GITHUB_ENV"
+    - name: Capabilities
+      timeout-minutes: 15
+      run: |
+        WTR_FILES=test/probe-capabilities.test.js yarn test 2>&1 | tee probe-capabilities.log
+        grep -q '"opfs":"ok"' probe-capabilities.log && echo "OPFS_OK=1" >> "$GITHUB_ENV" || echo "OPFS not available, suite skipped"
+    - if: env.OPFS_OK == '1'
+      name: Test with checked-in WASM files
       run: yarn test
       env:
+        WTR_TRACE: '1'
         WDIO_LOG_LEVEL: info
         WDIO_OUTPUT_DIR: probe/wdio-logs
     - if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: logs-${{ matrix.os }}-${{ matrix.browser }}-${{ matrix.mode }}-${{ matrix.attempt }}
+        name: logs-${{ matrix.os }}-${{ matrix.browser }}
         path: |
-          probe/logs
+          probe-capabilities.log
           probe/wdio-logs
         if-no-files-found: ignore

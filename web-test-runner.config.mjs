@@ -39,6 +39,20 @@ const LAUNCHERS = {
         : {}),
     },
   }),
+  safari: () => webdriverLauncher({
+    ...WDIO,
+    capabilities: { browserName: 'safari' },
+  }),
+  // Safari in the iOS simulator booted by the workflow (IOS_UDID).
+  'safari-ios': () => webdriverLauncher({
+    ...WDIO,
+    capabilities: {
+      platformName: 'iOS',
+      browserName: 'safari',
+      'safari:useSimulator': true,
+      ...(process.env.IOS_UDID ? { 'safari:deviceUDID': process.env.IOS_UDID } : {}),
+    },
+  }),
   // Playwright's WebKit has OPFS only in a persistent context.
   webkit: () => playwrightLauncher({
     product: 'webkit',
