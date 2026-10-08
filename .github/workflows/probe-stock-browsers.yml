@@ -54,6 +54,11 @@ jobs:
         for domain in com.apple.webinspectord com.apple.mobilesafari; do
           xcrun simctl spawn "$udid" defaults write "$domain" RemoteAutomationEnabled -bool YES
         done
+        open -a Simulator --args -CurrentDeviceUDID "$udid"
+        xcrun simctl launch "$udid" com.apple.mobilesafari
+        sleep 30
+        xcrun simctl terminate "$udid" com.apple.mobilesafari || true
+        echo "WTR_START_MS=300000" >> "$GITHUB_ENV"
         echo "IOS_UDID=$udid" >> "$GITHUB_ENV"
     - name: Capabilities
       timeout-minutes: 15
@@ -74,4 +79,5 @@ jobs:
         path: |
           probe-capabilities.log
           probe/wdio-logs
+          ~/Library/Logs/com.apple.WebDriver
         if-no-files-found: ignore
