@@ -57,6 +57,27 @@ jobs:
         xcrun simctl terminate "$udid" com.apple.mobilesafari || true
         echo "WTR_START_MS=300000" >> "$GITHUB_ENV"
         echo "IOS_UDID=$udid" >> "$GITHUB_ENV"
+    - if: matrix.ios
+      name: safaridriver diagnosis
+      timeout-minutes: 10
+      run: |
+        safaridriver --version
+        xcrun simctl list devices booted
+        safaridriver -p 4444 --diagnose &
+        sleep 3
+        for caps in \
+          '{"platformName":"iOS","browserName":"safari","safari:useSimulator":true}' \
+          "{\"platformName\":\"iOS\",\"browserName\":\"safari\",\"safari:useSimulator\":true,\"safari:deviceUDID\":\"$IOS_UDID\"}" \
+          '{"platformName":"iOS","browserName":"safari"}'; do
+          echo "== $caps"
+          resp=$(curl -s -m 120 -X POST localhost:4444/session -d "{\"capabilities\":{\"alwaysMatch\":$caps}}")
+          echo "$resp"
+          sid=$(echo "$resp" | jq -r '.value.sessionId // empty')
+          [ -n "$sid" ] && curl -s -X DELETE "localhost:4444/session/$sid" && echo
+        done
+        kill %1 || true
+        ls -la ~/Library/Logs/com.apple.WebDriver/ || true
+        tail -n 80 ~/Library/Logs/com.apple.WebDriver/* 2>/dev/null || true
     - name: Capabilities
       timeout-minutes: 15
       run: |
