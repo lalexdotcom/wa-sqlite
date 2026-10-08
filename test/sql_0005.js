@@ -97,6 +97,8 @@ async function transact(instance, sql) {
       }
       if (MODE === 'backoff') {
         await new Promise(resolve => setTimeout(resolve, 1 + Math.random() * 4));
+      } else if (MODE === 'slow') {
+        await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 50));
       }
     }
   }
