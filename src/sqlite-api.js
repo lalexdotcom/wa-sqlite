@@ -768,7 +768,8 @@ export function Factory(Module) {
   };
 
   sqlite3.step = function(stmt) {
-    // Always a Promise, without awaiting the one step_asap() may return.
+    // Always a Promise. Promise.resolve() passes on as is the one
+    // step_asap() may return; an async function is measurably slower.
     try {
       return Promise.resolve(sqlite3.step_asap(stmt));
     } catch (e) {
@@ -778,17 +779,20 @@ export function Factory(Module) {
 
   sqlite3.step_asap = (function() {
     const fname = 'sqlite3_step';
-    // A build that cannot suspend (no handleAsync) calls the export
-    // directly. The others use ccall without the async option, which
-    // returns a Promise only when the call did not complete synchronously
-    // (always with JSPI); passing options keeps cwrap from returning the
-    // bare export, which on the Asyncify build cannot tell that the call
-    // unwound.
-    const f = Module.handleAsync ?
+    // The Asyncify build uses ccall without the async option, which
+    // returns a Promise only when the call unwound; passing options keeps
+    // cwrap from returning the bare export, which cannot tell. The other
+    // builds call the export directly: it cannot suspend, or with JSPI it
+    // returns a Promise itself. A build with handleAsync that does not
+    // say which it is (no asyncMode) is taken for Asyncify.
+    const f = Module.handleAsync && Module.asyncMode !== 'jspi' ?
       Module.cwrap(fname, ...decl('n:n'), {}) :
       Module.cwrap(fname, ...decl('n:n'));
     const allowed = [SQLite.SQLITE_ROW, SQLite.SQLITE_DONE];
     const done = (rc, stmt) => {
+      // An optimization: most calls end here, sparing check()'s
+      // includes() on every row. Keep this function short, so Firefox
+      // still inlines it: two more lines here cost it about 7 %.
       if (rc === SQLite.SQLITE_ROW || rc === SQLite.SQLITE_DONE) return rc;
       return check(fname, rc, mapStmtToDB.get(stmt), allowed);
     };

@@ -147,6 +147,12 @@ describe('SQLite API step_asap', function() {
         expect(forms.every(form => form === expected)).toBeTrue();
       });
 
+      it('knows which asynchronous build it runs on', async function() {
+        // step_asap() calls the JSPI export directly when this says so.
+        const expected = { default: null, asyncify: 'asyncify', jspi: 'jspi' }[build];
+        expect(module.asyncMode).toBe(expected);
+      });
+
       if (build !== 'default') {
         it('returns a Promise when the VFS suspends', async function() {
           await open(new MemoryAsyncVFS('memory-async', module));

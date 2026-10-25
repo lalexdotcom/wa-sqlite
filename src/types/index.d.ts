@@ -769,9 +769,11 @@ declare interface SQLiteAPI {
    *
    * Like {@link step}, but returns the result directly when the call
    * completed synchronously, and a Promise only when it did not (e.g.
-   * a VFS operation suspended, or a retry or pending operation had to
+   * the build supports JSPI, or a retry or pending operation had to
    * be awaited). Which one comes back is decided on each call. This
-   * spares a Promise per row where no operation suspends:
+   * spares a Promise per row where no operation suspends.
+   *
+   * Using `step_asap()` to await only when necessary might look like this:
    * ```javascript
    * while (true) {
    *   let rc = sqlite3.step_asap(stmt);
@@ -782,8 +784,8 @@ declare interface SQLiteAPI {
    * ```
    * @see https://www.sqlite.org/c3ref/step.html
    * @param stmt prepared statement pointer
-   * @returns `SQLITE_ROW` or `SQLITE_DONE`, or a Promise resolving to
-   * one of them (throws on error, or the Promise rejects)
+   * @returns `SQLITE_ROW` or `SQLITE_DONE` either directly or
+   * by Promise (throws or rejects on error)
    */
   step_asap(stmt: number): number | Promise<number>;
 
