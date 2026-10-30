@@ -444,7 +444,12 @@ export function Factory(Module) {
   sqlite3.exec = async function(db, sql, callback) {
     for await (const stmt of sqlite3.statements(db, sql)) {
       let columns;
-      while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      while (true) {
+        // Await only when step_asap() returned a Promise.
+        let rc = sqlite3.step_asap(stmt);
+        if (typeof rc !== 'number') rc = await rc;
+        if (rc !== SQLite.SQLITE_ROW) break;
+
         if (callback) {
           columns = columns ?? sqlite3.column_names(stmt);
           const row = sqlite3.row(stmt);
@@ -779,22 +784,29 @@ export function Factory(Module) {
 
   sqlite3.step_asap = (function() {
     const fname = 'sqlite3_step';
-    // The Asyncify build uses ccall without the async option, which
-    // returns a Promise only when the call unwound; passing options keeps
-    // cwrap from returning the bare export, which cannot tell. The other
+    // Only Asyncify needs ccall, without the async option: it returns a
+    // Promise only when the call unwound (passing options keeps cwrap
+    // from returning the bare export, which cannot tell). The other
     // builds call the export directly: it cannot suspend, or with JSPI it
-    // returns a Promise itself. A build with handleAsync that does not
-    // say which it is (no asyncMode) is taken for Asyncify.
-    const f = Module.handleAsync && Module.asyncMode !== 'jspi' ?
+    // returns a Promise itself. This branch goes when Asyncify does.
+    const f = Module.asyncMode === 'asyncify' ?
       Module.cwrap(fname, ...decl('n:n'), {}) :
       Module.cwrap(fname, ...decl('n:n'));
-    const allowed = [SQLite.SQLITE_ROW, SQLite.SQLITE_DONE];
+
+    // Created once here rather than in the function returned below,
+    // whose cost is paid on every row: the statement is passed through
+    // retry() to done().
+    const fail = (rc, stmt) => {
+      const allowed = [SQLite.SQLITE_ROW, SQLite.SQLITE_DONE];
+      return check(fname, rc, mapStmtToDB.get(stmt), allowed);
+    };
     const done = (rc, stmt) => {
       // An optimization: most calls end here, sparing check()'s
-      // includes() on every row. Keep this function short, so Firefox
-      // still inlines it: two more lines here cost it about 7 %.
+      // includes() on every row. The error path is in fail() to keep
+      // this function small enough for the JIT to inline it; a few
+      // more lines here measurably slow every row.
       if (rc === SQLite.SQLITE_ROW || rc === SQLite.SQLITE_DONE) return rc;
-      return check(fname, rc, mapStmtToDB.get(stmt), allowed);
+      return fail(rc, stmt);
     };
     return function(stmt) {
       verifyStatement(stmt);

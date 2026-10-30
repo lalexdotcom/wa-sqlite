@@ -148,7 +148,7 @@ describe('SQLite API step_asap', function() {
       });
 
       it('knows which asynchronous build it runs on', async function() {
-        // step_asap() calls the JSPI export directly when this says so.
+        // step_asap() uses ccall only when this says Asyncify.
         const expected = { default: null, asyncify: 'asyncify', jspi: 'jspi' }[build];
         expect(module.asyncMode).toBe(expected);
       });
