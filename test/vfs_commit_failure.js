@@ -83,6 +83,32 @@ export function vfs_commit_failure({ build }) {
       expect((await exec(c, 'PRAGMA integrity_check')).rows).toEqual([['ok']]);
     });
 
+    // Without a read after the failure, the failed connection's next commit
+    // is written over the other connection's frames, and the other
+    // connection's next commit over those.
+    for (const [size, value] of [['the same size', '10'], ['larger', 'randomblob(9000)']]) {
+      it(`should keep the database intact when another connection commits ${size} after the failure`, async function() {
+        const filename = newFilename();
+        const a = connect(filename);
+        const b = connect(filename);
+        expect((await exec(a, 'CREATE TABLE t(x); INSERT INTO t VALUES (1)')).error).toBeUndefined();
+
+        await a({ type: 'fail-next-write', write: 'commit', mode: 'short' });
+        expect((await exec(a, 'INSERT INTO t VALUES (2)')).error).toBeDefined();
+
+        expect((await exec(b, `INSERT INTO t VALUES (${value})`)).error).toBeUndefined();
+        expect((await exec(a, 'INSERT INTO t VALUES (3)')).error).toBeUndefined();
+        expect((await exec(b, 'INSERT INTO t VALUES (4)')).error).toBeUndefined();
+
+        const c = connect(filename);
+        expect((await exec(c, 'PRAGMA integrity_check')).rows).toEqual([['ok']]);
+        // A blob reads as its length.
+        const { rows } = await exec(c,
+          `SELECT CASE WHEN typeof(x) = 'blob' THEN length(x) ELSE x END FROM t ORDER BY rowid`);
+        expect(rows.map(row => row[0])).toEqual([1, value === '10' ? 10 : 9000, 3, 4]);
+      });
+    }
+
     // A commit that changes write-ahead file also writes the other file's
     // header and an end frame. journal_size_limit = 1 makes the next commit
     // change file.
