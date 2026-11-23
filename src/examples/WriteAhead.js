@@ -451,81 +451,100 @@ export class WriteAhead {
       } else {
         // Wait for all connections to reach the current txId.
         await this.#waitForTxIdLocks(value => value.maxTxId >= this.#txId);
+
+        // Checkpoint and truncate the inactive WAL file first, as a
+        // passive checkpoint would. Otherwise the database file can hold
+        // pages from the active WAL file while the inactive one is still
+        // there, and if this connection stops before truncating it, a
+        // later passive checkpoint copies its older pages over them.
+        if (this.#mapIdToTx.has(ckptId)) {
+          await this.#checkpointThrough(ckptId, { isPassive: true });
+        }
         ckptId = this.#txId;
       }
-      this.log?.(`%ccheckpoint through txId ${ckptId}`, 'color: black; background-color: lightgreen;');
-
-      // Sync the WAL file. This ensures that if there is a crash after
-      // part of the WAL has been copied, the uncopied part will still be
-      // available afterwards.
-      this.#flushInactiveFile();
-      if (!options.isPassive) {
-        this.#flushActiveFile();
-      }
-
-      // Starting at ckptId and going backwards (higher to lower txId),
-      // plan writing transaction pages to the main database file. Do not
-      // overwrite a page written by a more recent transaction.
-      /** @type {CheckpointPlan} */ const plan = { pageSize: 0, actions: [] };
-      const writtenOffsets = new Set();
-      let dbFileSize = this.#dbHandle.getSize();
-      for (let tx = this.#mapIdToTx.get(ckptId); tx; tx = this.#mapIdToTx.get(tx.id - 1)) {
-        if (tx.id === ckptId && dbFileSize !== tx.dbFileSize) {
-          // Set the file size from the latest transaction.
-          dbFileSize = tx.dbFileSize;
-          this.#dbHandle.truncate(dbFileSize);
-        }
-
-        for (const [offset, pageEntry] of tx.pages) {
-          if (offset < dbFileSize && !writtenOffsets.has(offset)) {
-            if (plan.pageSize && plan.pageSize !== pageEntry.pageSize) {
-              throw new Error('Checkpoint page size mismatch');
-            }
-            plan.pageSize = pageEntry.pageSize;
-
-            const page = this.#getPageKey(pageEntry);
-            plan.actions.push(
-              { action: 'read', pages: [page] },
-              { action: 'write', at: offset, pages: [page] });
-            writtenOffsets.add(offset);
-          }
-        }
-
-        if (tx.newPageSize) {
-          // This transaction used a new page size to overwrite the entire
-          // database file so no older pages need to be written. This is
-          // not just an optimization; it prevents incorrectly writing
-          // older smaller pages at addresses that aren't multiples of
-          // the new page size.
-          break;
-        }
-      }
-
-      // Coalesce the plan's pages into fewer calls, within a bounded buffer.
-      const { checkpointBufferSize: bufferSize } = this.options;
-      this.#executeCheckpointPlan(coalesceReads(coalesceWrites(plan, { bufferSize })));
-
-      // Ensure that database writes are durable.
-      this.log?.(`%ccheckpoint flush database file`, 'color: black; background-color: lightgreen;');
-      this.#dbHandle.flush();
-
-      // Notify other connections and ourselves of the checkpoint.
-      this.#broadcastChannel.postMessage({
-        type: 'ckpt',
-        ckptId,
-      });
-      this.#handleCheckpoint(ckptId);
-
-      // Wait for all connections to update their overlay.
-      this.log?.(`%ccheckpoint waiting for connection updates`, 'color: black; background-color: lightgreen;');
-      await this.#waitForTxIdLocks(value => value.minTxId > ckptId);
-
-      // Truncate the inactive WAL file. This prevents new connections from
-      // unnecessarily reading checkpointed data, and allows writers to make
-      // it active when their conditions are met.
-      this.#truncateInactiveFile();
-      this.log?.(`%ccheckpoint complete`, 'color: black; background-color: lightgreen;');
+      await this.#checkpointThrough(ckptId, options);
     });
+  }
+
+  /**
+   * Copy the transactions through ckptId to the database file, then
+   * truncate the inactive WAL file once no connection uses them.
+   * @param {number} ckptId
+   * @param {{isPassive: boolean}} options
+   */
+  async #checkpointThrough(ckptId, options) {
+    this.log?.(`%ccheckpoint through txId ${ckptId}`, 'color: black; background-color: lightgreen;');
+
+    // Sync the WAL file. This ensures that if there is a crash after
+    // part of the WAL has been copied, the uncopied part will still be
+    // available afterwards.
+    this.#flushInactiveFile();
+    if (!options.isPassive) {
+      this.#flushActiveFile();
+    }
+
+    // Starting at ckptId and going backwards (higher to lower txId),
+    // plan writing transaction pages to the main database file. Do not
+    // overwrite a page written by a more recent transaction.
+    /** @type {CheckpointPlan} */ const plan = { pageSize: 0, actions: [] };
+    const writtenOffsets = new Set();
+    let dbFileSize = this.#dbHandle.getSize();
+    for (let tx = this.#mapIdToTx.get(ckptId); tx; tx = this.#mapIdToTx.get(tx.id - 1)) {
+      if (tx.id === ckptId && dbFileSize !== tx.dbFileSize) {
+        // Set the file size from the latest transaction.
+        dbFileSize = tx.dbFileSize;
+        this.#dbHandle.truncate(dbFileSize);
+      }
+
+      for (const [offset, pageEntry] of tx.pages) {
+        if (offset < dbFileSize && !writtenOffsets.has(offset)) {
+          if (plan.pageSize && plan.pageSize !== pageEntry.pageSize) {
+            throw new Error('Checkpoint page size mismatch');
+          }
+          plan.pageSize = pageEntry.pageSize;
+
+          const page = this.#getPageKey(pageEntry);
+          plan.actions.push(
+            { action: 'read', pages: [page] },
+            { action: 'write', at: offset, pages: [page] });
+          writtenOffsets.add(offset);
+        }
+      }
+
+      if (tx.newPageSize) {
+        // This transaction used a new page size to overwrite the entire
+        // database file so no older pages need to be written. This is
+        // not just an optimization; it prevents incorrectly writing
+        // older smaller pages at addresses that aren't multiples of
+        // the new page size.
+        break;
+      }
+    }
+
+    // Coalesce the plan's pages into fewer calls, within a bounded buffer.
+    const { checkpointBufferSize: bufferSize } = this.options;
+    this.#executeCheckpointPlan(coalesceReads(coalesceWrites(plan, { bufferSize })));
+
+    // Ensure that database writes are durable.
+    this.log?.(`%ccheckpoint flush database file`, 'color: black; background-color: lightgreen;');
+    this.#dbHandle.flush();
+
+    // Notify other connections and ourselves of the checkpoint.
+    this.#broadcastChannel.postMessage({
+      type: 'ckpt',
+      ckptId,
+    });
+    this.#handleCheckpoint(ckptId);
+
+    // Wait for all connections to update their overlay.
+    this.log?.(`%ccheckpoint waiting for connection updates`, 'color: black; background-color: lightgreen;');
+    await this.#waitForTxIdLocks(value => value.minTxId > ckptId);
+
+    // Truncate the inactive WAL file. This prevents new connections from
+    // unnecessarily reading checkpointed data, and allows writers to make
+    // it active when their conditions are met.
+    this.#truncateInactiveFile();
+    this.log?.(`%ccheckpoint complete`, 'color: black; background-color: lightgreen;');
   }
 
   /**
