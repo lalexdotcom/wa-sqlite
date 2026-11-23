@@ -335,6 +335,28 @@ export class WriteAhead {
   }
 
   commit() {
+    try {
+      this.#commit();
+    } catch (e) {
+      // A transaction that fails before its commit frame is written is
+      // still in progress, and SQLite does not roll it back after a failed
+      // sync. Discard it, or the next transaction on this connection would
+      // carry it, from a log position another connection may since have
+      // written over.
+      if (this.#txInProgress) {
+        try {
+          this.#abortTx();
+        } catch {
+          // #abortTx() has discarded the transaction before truncating.
+          // Frames left past #activeOffset have no commit frame, and the
+          // next transaction writes over them.
+        }
+      }
+      throw e;
+    }
+  }
+
+  #commit() {
     const tx = this.#txInProgress;
     if (tx.newPageSize && tx.pages.size === 0) {
       // This transaction is a VACUUM with a page size increase. All
