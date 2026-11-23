@@ -1055,6 +1055,13 @@ export class WriteAhead {
    * @returns {Transaction}
    */
   #commitTx(changeFile) {
+    // A commit frame that changes file is visible to readers only once the
+    // other file has its header, so write that header first. The commit
+    // frame is then the commit point, and nothing after it may fail.
+    const nextFileHeader = changeFile ?
+      this.#writeFileHeader(this.#activeHeader.salt1, this.#txInProgress.id + 1) :
+      null;
+
     // Write a commit frame - which is a special frame header with no body -
     // to the WAL file.
     const headerView = new DataView(new ArrayBuffer(FRAME_HEADER_SIZE));
@@ -1086,7 +1093,7 @@ export class WriteAhead {
     this.#txId = tx.id;
 
     if (changeFile) {
-      this.#swapActiveFile();
+      this.#swapActiveFile(nextFileHeader);
 
       // Move the transaction WAL position to the new file. This ensures that
       // once all connections have reached this transaction, the other WAL
@@ -1105,10 +1112,13 @@ export class WriteAhead {
 
   /**
    * Switch the active WAL file prior to writing the next transaction.
+   * @param {{nextTxId: number, salt1: number, salt2: number}} fileHeader
+   *   the header already written to the other WAL file
    */
-  #swapActiveFile() {
+  #swapActiveFile(fileHeader) {
     // Write an end frame for readers that do not understand the commit
-    // change-file flag.
+    // change-file flag. The transaction is already committed, and readers
+    // of the flag do not need the end frame, so a failed write is ignored.
     const frameView = new DataView(new ArrayBuffer(FRAME_HEADER_SIZE));
     frameView.setUint8(0, FRAME_TYPE_END);
     frameView.setUint32(16, this.#activeHeader.salt1);
@@ -1119,13 +1129,13 @@ export class WriteAhead {
     frameView.setUint32(24, checksum.s0);
     frameView.setUint32(28, checksum.s1);
 
-    const bytesWritten = this.#activeHandle.write(frameView, { at: this.#activeOffset });
-    if (bytesWritten !== frameView.byteLength) {
-      throw new Error('write failed');
+    try {
+      this.#activeHandle.write(frameView, { at: this.#activeOffset });
+    } catch {
     }
 
-    // Initialize the other WAL file and make it active.
-    this.#activeHeader = this.#writeFileHeader();
+    // Make the other WAL file active.
+    this.#activeHeader = fileHeader;
     this.#activeHandle = this.#getInactiveHandle();
     this.#activeOffset = FILE_HEADER_SIZE;
   }
@@ -1158,8 +1168,12 @@ export class WriteAhead {
     }
 
     // This test is sufficient by itself but the previous tests are
-    // less expensive.
-    return this.#readFileHeader(inactiveHandle) === null;
+    // less expensive. A header that follows the active file's was
+    // written for a commit that did not complete, so its file holds
+    // no transaction.
+    const fileHeader = this.#readFileHeader(inactiveHandle);
+    return fileHeader === null ||
+      fileHeader.salt1 === ((this.#activeHeader.salt1 + 1) >>> 0);
   }
 
   #truncateInactiveFile() {
@@ -1311,9 +1325,8 @@ export class WriteAhead {
     throw new Error(`Invalid frame type: ${frameType}`);
   }
 
-  #writeFileHeader(prevSalt1 = this.#activeHeader.salt1) {
+  #writeFileHeader(prevSalt1 = this.#activeHeader.salt1, nextTxId = this.#txId + 1) {
     // Derive new values from the previous values.
-    const nextTxId = this.#txId + 1;
     const salt1 = (prevSalt1 + 1) >>> 0;
     const salt2 = Math.floor(Math.random() * 0xffffffff) >>> 0;
     const headerView = new DataView(new ArrayBuffer(FILE_HEADER_SIZE));

@@ -1,6 +1,7 @@
 // A worker for vfs_commit_failure.js, holding one connection on
 // OPFSWriteAheadVFS. It can make the write of the next commit frame fail,
-// either short or with an exception, as a full quota would.
+// or of the frames that follow it, either short or with an exception, as
+// a full quota would, or stop there, as a terminated context would.
 import * as SQLite from '../src/sqlite-api.js';
 import { OPFSWriteAheadVFS } from '../src/examples/OPFSWriteAheadVFS.js';
 
@@ -10,25 +11,36 @@ const BUILDS = new Map([
   ['jspi', '../dist/wa-sqlite-jspi.mjs'],
 ]);
 
-// A commit frame is a 32-byte frame header of type 1, written on its own.
+// The writes that can fail are told apart by their first bytes: a frame
+// header of type 1 (commit) or 2 (end), or a file header (magic 0x377f0684).
 const FRAME_HEADER_SIZE = 32;
-const FRAME_TYPE_COMMIT = 1;
+const MATCHERS = {
+  commit: bytes => bytes[0] === 1,
+  end: bytes => bytes[0] === 2,
+  header: bytes => bytes[0] === 0x37 && bytes[1] === 0x7f,
+};
 
 const searchParams = new URLSearchParams(location.search);
 
-/** @type {'short'|'throw'|null} */ let failNextCommit = null;
+/** @type {{ write: string, mode: 'short'|'throw'|'hang' }?} */ let failNext = null;
 const write = FileSystemSyncAccessHandle.prototype.write;
 FileSystemSyncAccessHandle.prototype.write = function(buffer, options) {
   const bytes = ArrayBuffer.isView(buffer) ?
     new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
     new Uint8Array(buffer);
-  if (failNextCommit &&
+  if (failNext &&
       bytes.byteLength === FRAME_HEADER_SIZE &&
-      bytes[0] === FRAME_TYPE_COMMIT) {
-    const mode = failNextCommit;
-    failNextCommit = null;
+      MATCHERS[failNext.write](bytes)) {
+    const { mode } = failNext;
+    failNext = null;
     if (mode === 'throw') {
       throw new DOMException('quota exceeded', 'QuotaExceededError');
+    }
+    if (mode === 'hang') {
+      // Stand for a context terminated at this write: tell the page, which
+      // terminates this worker, and never return.
+      postMessage({ stuck: true });
+      while (true);
     }
     return 0;
   }
@@ -59,8 +71,8 @@ addEventListener('message', async ({ data }) => {
         }
         break;
       }
-      case 'fail-next-commit':
-        failNextCommit = data.mode;
+      case 'fail-next-write':
+        failNext = { write: data.write, mode: data.mode };
         postMessage({});
         break;
       case 'close':
